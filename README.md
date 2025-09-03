@@ -301,6 +301,8 @@ python -m active_directory_mcp.server_http --host 0.0.0.0 --port 8813 --path /ac
 - `health` - Server health check
 - `get_schema_info` - Tool schema information
 
+> **⚠️ Note**: ActiveDirectoryMCP provides 43 tools total. Some LLM models may experience issues with this many tools.
+
 ## 🔒 Security Configuration
 
 ### Service Account Setup
@@ -487,6 +489,10 @@ ActiveDirectoryMCP/
    # Change port if needed
    HTTP_PORT=8814 ./start_http_server.sh
    ```
+
+5. **⚠️ LLM Tool Limit Warning**
+   
+   Some LLM models may experience issues with 40+ tools in context.
 
 ### View Logs
 ```bash
