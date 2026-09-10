@@ -43,7 +43,7 @@ class GroupTools(BaseTool):
             if attributes is None:
                 attributes = [
                     'sAMAccountName', 'displayName', 'description', 'mail',
-                    'groupType', 'groupScope', 'member', 'memberOf',
+                    'groupType', 'member', 'memberOf',
                     'whenCreated', 'whenChanged', 'managedBy'
                 ]
             
@@ -114,11 +114,11 @@ class GroupTools(BaseTool):
             escaped_group_name = self._escape_ldap_filter(group_name)
             search_filter = f"(&(objectClass=group)(sAMAccountName={escaped_group_name}))"
             
-            # Determine attributes to retrieve
+          # Determine attributes to retrieve
             if attributes is None:
                 attributes = [
                     'sAMAccountName', 'displayName', 'description', 'mail',
-                    'groupType', 'groupScope', 'member', 'memberOf',
+                    'groupType', 'member', 'memberOf',
                     'whenCreated', 'whenChanged', 'managedBy', 'info'
                 ]
             
@@ -613,9 +613,9 @@ class GroupTools(BaseTool):
                 "list_groups", "get_group", "create_group", "modify_group",
                 "delete_group", "add_member", "remove_member", "get_members"
             ],
-            "group_attributes": [
+           "group_attributes": [
                 "sAMAccountName", "displayName", "description", "mail",
-                "groupType", "groupScope", "member", "memberOf", "managedBy"
+                "groupType", "member", "memberOf", "managedBy"
             ],
             "group_scopes": ["Global", "DomainLocal", "Universal"],
             "group_types": ["Security", "Distribution"],

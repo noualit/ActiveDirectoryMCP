@@ -116,7 +116,8 @@ class LDAPManager:
                                 receive_timeout=self.ad_config.receive_timeout,
                                 authentication=ldap3.SIMPLE,
                                 check_names=True,
-                                raise_exceptions=True
+                                raise_exceptions=True,
+                                read_timeout=self.ad_config.receive_timeout
                             )
                             
                             # Test the connection
@@ -127,7 +128,7 @@ class LDAPManager:
                             else:
                                 logger.warning(f"Failed to bind to {server.host}:{server.port}")
                                 
-                        except (LDAPSocketOpenError, LDAPBindError) as e:
+                        except (LDAPSocketOpenError, LDAPBindError, OSError) as e:
                             logger.warning(f"Connection failed to {server.host}:{server.port}: {e}")
                             last_error = e
                             continue
@@ -240,6 +241,12 @@ class LDAPManager:
             logger.debug(f"Search returned {len(entries)} entries")
             return entries
             
+        except OSError as e:
+            # Socket error (WSAECONNRESET, WinError 10054)
+            # La conexión fue cerrada forzosamente por el servidor
+            logger.error(f"Socket error during search: {e}. Reconnecting...")
+            self._connection = None  # Forzar reconexion
+            raise LDAPException(f"Socket error: {e}") from e
         except Exception as e:
             logger.error(f"Search error: {e}")
             raise
@@ -272,6 +279,10 @@ class LDAPManager:
                 logger.error(f"Failed to add entry {dn}: {connection.result}")
                 raise LDAPException(f"Add operation failed: {connection.result}")
                 
+        except OSError as e:
+            logger.error(f"Socket error during add for {dn}: {e}. Reconnecting...")
+            self._connection = None  # Forzar reconexion en proxima llamada
+            raise LDAPException(f"Socket error: {e}") from e
         except Exception as e:
             logger.error(f"Add error for {dn}: {e}")
             raise
@@ -304,6 +315,10 @@ class LDAPManager:
                 logger.error(f"Failed to modify entry {dn}: {connection.result}")
                 raise LDAPException(f"Modify operation failed: {connection.result}")
                 
+        except OSError as e:
+            logger.error(f"Socket error during modify for {dn}: {e}. Reconnecting...")
+            self._connection = None  # Forzar reconexion en proxima llamada
+            raise LDAPException(f"Socket error: {e}") from e
         except Exception as e:
             logger.error(f"Modify error for {dn}: {e}")
             raise
@@ -335,6 +350,10 @@ class LDAPManager:
                 logger.error(f"Failed to delete entry {dn}: {connection.result}")
                 raise LDAPException(f"Delete operation failed: {connection.result}")
                 
+        except OSError as e:
+            logger.error(f"Socket error during delete for {dn}: {e}. Reconnecting...")
+            self._connection = None  # Forzar reconexion en proxima llamada
+            raise LDAPException(f"Socket error: {e}") from e
         except Exception as e:
             logger.error(f"Delete error for {dn}: {e}")
             raise
@@ -367,6 +386,10 @@ class LDAPManager:
                 logger.error(f"Failed to move entry {dn}: {connection.result}")
                 raise LDAPException(f"Move operation failed: {connection.result}")
                 
+        except OSError as e:
+            logger.error(f"Socket error during move for {dn}: {e}. Reconnecting...")
+            self._connection = None  # Forzar reconexion en proxima llamada
+            raise LDAPException(f"Socket error: {e}") from e
         except Exception as e:
             logger.error(f"Move error for {dn}: {e}")
             raise
