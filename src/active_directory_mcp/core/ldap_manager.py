@@ -116,8 +116,7 @@ class LDAPManager:
                                 receive_timeout=self.ad_config.receive_timeout,
                                 authentication=ldap3.SIMPLE,
                                 check_names=True,
-                                raise_exceptions=True,
-                                read_timeout=self.ad_config.receive_timeout
+                                raise_exceptions=True
                             )
                             
                             # Test the connection
