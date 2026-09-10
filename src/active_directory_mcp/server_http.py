@@ -48,7 +48,7 @@ class ActiveDirectoryMCPHTTPServer:
     
     def __init__(self, 
                  config_path: Optional[str] = None,
-                 host: str = "0.0.0.0",
+                 host: str = "192.168.0.92",
                  port: int = 8813,
                  path: str = "/activedirectory-mcp"):
         """
@@ -371,12 +371,11 @@ class ActiveDirectoryMCPHTTPServer:
             self.logger.info(f"Connected to: {self.config.active_directory.server}")
             self.logger.info(f"Domain: {self.config.active_directory.domain}")
             
-            # Run with FastMCP's built-in HTTP transport
+            # Run with FastMCP's Streamable HTTP transport (correct API for FastMCP 3.x)
             self.mcp.run(
-                transport="http",
+                transport="streamable-http",
                 host=self.host,
-                port=self.port,
-                path=self.path
+                port=self.port
             )
         except Exception as e:
             self.logger.error(f"HTTP server error: {e}")
@@ -428,7 +427,7 @@ class ActiveDirectoryMCPCommand:
         
         self.server = ActiveDirectoryMCPHTTPServer(
             config_path=config_path,
-            host=options.get('host', '0.0.0.0'),
+            host=options.get('host', '192.168.0.92 '),
             port=options.get('port', 8813),
             path=options.get('path', '/activedirectory-mcp')
         )

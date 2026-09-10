@@ -1,0 +1,12 @@
+{
+    "active_directory": {
+        "server": "ldaps://192.168.0.11:636",
+        "domain": "UBAGOCV.local",
+        "base_dn": "DC=UBAGOCV,DC=local",
+        "bind_dn": "CN=noualit,OU=Usuarios sin Política de Seguridad,DC=UBAGOCV,DC=local",
+        "password": "Xc=1/2pifC",
+        "timeout": 30,
+        "auto_bind": true,
+        "receive_timeout": 10
+    }
+}

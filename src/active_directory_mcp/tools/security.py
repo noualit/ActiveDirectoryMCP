@@ -1,7 +1,7 @@
 """Security and audit tools for Active Directory."""
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import base64
 
 import ldap3
@@ -231,29 +231,19 @@ class SecurityTools(BaseTool):
             
         except Exception as e:
             return self._handle_ldap_error(e, "get_user_permissions", username)
-    
+
     def get_inactive_users(self, days: int = 90, include_disabled: bool = False) -> List[Dict[str, Any]]:
         """
         Get users who haven't logged in for specified number of days.
-        
-        Args:
-            days: Number of days to consider inactive (default: 90)
-            include_disabled: Include disabled accounts in results (default: False)
-            
-        Returns:
-            List of MCP content objects with inactive user information
         """
         try:
-            # Calculate cutoff date
-            cutoff_date = datetime.now() - timedelta(days=days)
-            cutoff_filetime = self._convert_datetime_to_filetime(cutoff_date)
+            # ✅ Usar UTC para ambos lados de la comparación
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
             
-            # Build search filter
             search_filter = "(objectClass=user)"
             if not include_disabled:
                 search_filter = "(&(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
             
-            # Search for all users
             results = self.ldap.search(
                 search_base=self.ldap.ad_config.base_dn,
                 search_filter=search_filter,
@@ -265,29 +255,42 @@ class SecurityTools(BaseTool):
             
             inactive_users = []
             for entry in results:
-                last_logon = self._get_attr_value(entry['attributes'], 'lastLogon', 0)
-
-                # Check if user is inactive
-                if last_logon == 0 or last_logon < cutoff_filetime:
+                last_logon_raw = self._get_attr_value(entry['attributes'], 'lastLogon', 0)
+                
+                # Normalizar last_logon a datetime aware en UTC
+                if isinstance(last_logon_raw, datetime):
+                    # Si es naive, forzar UTC; si ya tiene tz, convertir a UTC
+                    if last_logon_raw.tzinfo is None:
+                        last_logon_dt = last_logon_raw.replace(tzinfo=timezone.utc)
+                    else:
+                        last_logon_dt = last_logon_raw.astimezone(timezone.utc)
+                elif isinstance(last_logon_raw, int) and last_logon_raw > 0:
+                    last_logon_dt = self._convert_filetime_to_datetime(last_logon_raw)
+                    # Asegurar que sea aware (asumimos UTC para filetime de Windows)
+                    if last_logon_dt.tzinfo is None:
+                        last_logon_dt = last_logon_dt.replace(tzinfo=timezone.utc)
+                else:
+                    last_logon_dt = None
+                
+                # ✅ Comparación segura: ambos son offset-aware UTC
+                if last_logon_dt is None or last_logon_dt < cutoff_date:
                     uac = self._get_attr_value(entry['attributes'], 'userAccountControl', 0)
                     member_of = self._get_attr_list(entry['attributes'], 'memberOf')
-
+                    
                     user_info = {
                         'dn': entry['dn'],
                         'sam_account_name': self._get_attr_value(entry['attributes'], 'sAMAccountName', ''),
                         'display_name': self._get_attr_value(entry['attributes'], 'displayName', ''),
                         'mail': self._get_attr_value(entry['attributes'], 'mail', ''),
-                        'last_logon': self._convert_filetime_to_datetime(last_logon) if last_logon > 0 else 'Never',
-                        'days_inactive': self._get_days_since_last_logon({'lastLogon': last_logon}),
+                        'last_logon': last_logon_dt.isoformat() if last_logon_dt else 'Never',
+                        'days_inactive': (datetime.now(timezone.utc) - last_logon_dt).days if last_logon_dt else 99999,
                         'enabled': not bool(uac & 0x0002),
                         'group_count': len(member_of),
                         'has_privileged_groups': self._has_privileged_groups(member_of)
                     }
-
                     inactive_users.append(user_info)
             
-            # Sort by days inactive (descending)
-            inactive_users.sort(key=lambda x: x['days_inactive'] or 99999, reverse=True)
+            inactive_users.sort(key=lambda x: x['days_inactive'], reverse=True)
             
             log_ldap_operation("get_inactive_users", self.ldap.ad_config.base_dn, True, f"Found {len(inactive_users)} inactive users")
             
@@ -301,7 +304,7 @@ class SecurityTools(BaseTool):
             
         except Exception as e:
             return self._handle_ldap_error(e, "get_inactive_users", self.ldap.ad_config.base_dn)
-    
+            
     def get_password_policy_violations(self) -> List[Dict[str, Any]]:
         """
         Get users with password policy violations.
