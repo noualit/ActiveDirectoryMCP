@@ -255,40 +255,40 @@ class SecurityTools(BaseTool):
             
             inactive_users = []
             for entry in results:
-                last_logon_raw = self._get_attr_value(entry['attributes'], 'lastLogon', 0)
-                
-                # Normalizar last_logon a datetime aware en UTC
-                if isinstance(last_logon_raw, datetime):
-                    # Si es naive, forzar UTC; si ya tiene tz, convertir a UTC
-                    if last_logon_raw.tzinfo is None:
-                        last_logon_dt = last_logon_raw.replace(tzinfo=timezone.utc)
-                    else:
-                        last_logon_dt = last_logon_raw.astimezone(timezone.utc)
-                elif isinstance(last_logon_raw, int) and last_logon_raw > 0:
-                    last_logon_dt = self._convert_filetime_to_datetime(last_logon_raw)
-                    # Asegurar que sea aware (asumimos UTC para filetime de Windows)
-                    if last_logon_dt.tzinfo is None:
-                        last_logon_dt = last_logon_dt.replace(tzinfo=timezone.utc)
-                else:
-                    last_logon_dt = None
-                
-                # ✅ Comparación segura: ambos son offset-aware UTC
-                if last_logon_dt is None or last_logon_dt < cutoff_date:
-                    uac = self._get_attr_value(entry['attributes'], 'userAccountControl', 0)
-                    member_of = self._get_attr_list(entry['attributes'], 'memberOf')
+                try:
+                    last_logon_raw = self._get_attr_value(entry['attributes'], 'lastLogon', 0)
                     
-                    user_info = {
-                        'dn': entry['dn'],
-                        'sam_account_name': self._get_attr_value(entry['attributes'], 'sAMAccountName', ''),
-                        'display_name': self._get_attr_value(entry['attributes'], 'displayName', ''),
-                        'mail': self._get_attr_value(entry['attributes'], 'mail', ''),
-                        'last_logon': last_logon_dt.isoformat() if last_logon_dt else 'Never',
-                        'days_inactive': (datetime.now(timezone.utc) - last_logon_dt).days if last_logon_dt else 99999,
-                        'enabled': not bool(uac & 0x0002),
-                        'group_count': len(member_of),
-                        'has_privileged_groups': self._has_privileged_groups(member_of)
-                    }
-                    inactive_users.append(user_info)
+                    # Normalizar last_logon a datetime aware en UTC
+                    last_logon_dt = self._normalize_last_logon(last_logon_raw)
+                    if last_logon_dt is not None:
+                        last_logon_dt = last_logon_dt.replace(tzinfo=timezone.utc)
+                    
+                    # ✅ Comparación segura: ambos son offset-aware UTC
+                    if last_logon_dt is None or last_logon_dt < cutoff_date:
+                        uac = self._get_attr_value(entry['attributes'], 'userAccountControl', 0)
+                        member_of = self._get_attr_list(entry['attributes'], 'memberOf')
+                        
+                        user_info = {
+                            'dn': entry['dn'],
+                            'sam_account_name': self._get_attr_value(entry['attributes'], 'sAMAccountName', ''),
+                            'display_name': self._get_attr_value(entry['attributes'], 'displayName', ''),
+                            'mail': self._get_attr_value(entry['attributes'], 'mail', ''),
+                            'last_logon': last_logon_dt.isoformat() if last_logon_dt else 'Never',
+                            'days_inactive': (datetime.now(timezone.utc) - last_logon_dt).days if last_logon_dt else 99999,
+                            'enabled': not bool(uac & 0x0002),
+                            'group_count': len(member_of),
+                            'has_privileged_groups': self._has_privileged_groups(member_of)
+                        }
+                        inactive_users.append(user_info)
+                except Exception as entry_error:
+                    # Un error de conversion en una entrada (p.ej. lastLogon
+                    # corrupto que excede el rango de C int) NO debe tumbar
+                    # toda la consulta. Se loggea y se continua con la siguiente.
+                    self.logger.warning(
+                        "Skipping entry %s in get_inactive_users: %s",
+                        entry.get('dn', '?'), entry_error
+                    )
+                    continue
             
             inactive_users.sort(key=lambda x: x['days_inactive'], reverse=True)
             
@@ -466,6 +466,7 @@ class SecurityTools(BaseTool):
 
                                 # Check last logon
                                 last_logon = self._get_attr_value(user_entry['attributes'], 'lastLogon', 0)
+                                last_logon_dt = self._normalize_last_logon(last_logon)
                                 days_since_logon = self._get_days_since_last_logon({'lastLogon': last_logon})
                                 if days_since_logon and days_since_logon > 90:
                                     security_issues.append(f"No logon for {days_since_logon} days")
@@ -477,7 +478,7 @@ class SecurityTools(BaseTool):
                                     'mail': self._get_attr_value(user_entry['attributes'], 'mail', ''),
                                     'privileged_group': group_name,
                                     'enabled': not bool(uac & 0x0002),
-                                    'last_logon': self._convert_filetime_to_datetime(last_logon) if last_logon > 0 else 'Never',
+                                    'last_logon': last_logon_dt.isoformat() if last_logon_dt else 'Never',
                                     'days_since_logon': days_since_logon,
                                     'logon_count': self._get_attr_value(user_entry['attributes'], 'logonCount', 0),
                                     'bad_pwd_count': self._get_attr_value(user_entry['attributes'], 'badPwdCount', 0),
@@ -613,38 +614,6 @@ class SecurityTools(BaseTool):
             return "Review account permissions and consider implementing additional security controls"
         else:
             return "Monitor account activity and maintain current security posture"
-    
-    def _convert_filetime_to_datetime(self, filetime: int) -> datetime:
-        """Convert Windows FILETIME to datetime."""
-        return datetime(1601, 1, 1) + timedelta(microseconds=filetime / 10)
-    
-    def _convert_datetime_to_filetime(self, dt: datetime) -> int:
-        """Convert datetime to Windows FILETIME."""
-        from datetime import timezone
-
-        # If dt is timezone-aware, convert to UTC and make naive
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-
-        epoch = datetime(1601, 1, 1)
-        delta = dt - epoch
-        return int(delta.total_seconds() * 10000000)
-    
-    def _get_days_since_last_logon(self, attributes: Dict[str, Any]) -> Optional[int]:
-        """Get number of days since last logon."""
-        # Support both dict with 'lastLogon' key and raw value
-        if isinstance(attributes.get('lastLogon'), (int, float)):
-            last_logon = attributes.get('lastLogon', 0)
-        else:
-            last_logon = self._get_attr_value(attributes, 'lastLogon', 0)
-        if last_logon == 0:
-            return None
-
-        try:
-            last_logon_date = self._convert_filetime_to_datetime(last_logon)
-            return (datetime.now() - last_logon_date).days
-        except:
-            return None
     
     # Additional methods for security testing
     def check_password_policy(self) -> Dict[str, Any]:
