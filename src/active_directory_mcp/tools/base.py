@@ -3,7 +3,7 @@
 import json
 from typing import List, Dict, Any, Optional
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from mcp.types import TextContent as Content
 from ldap3.core.exceptions import LDAPException
@@ -248,6 +248,127 @@ class BaseTool(ABC):
 
         # Otherwise wrap in a list
         return [value]
+
+    def _convert_filetime_to_datetime(self, filetime) -> datetime:
+        """
+        Convert Windows FILETIME to datetime.
+
+        ldap3 decodes FILETIME attributes (lastLogon, pwdLastSet, ...) as
+        datetime.datetime in some entries and as int FILETIME in others.
+        This helper accepts both representations.
+
+        Args:
+            filetime: int/float FILETIME or datetime
+
+        Returns:
+            Naive datetime
+        """
+        # If already datetime, return as is
+        if isinstance(filetime, datetime):
+            return filetime
+
+        # Convert integer FILETIME (100-nanosecond intervals since January 1, 1601)
+        if isinstance(filetime, (int, float)) and filetime != 0:
+            # Rango valido de FILETIME para AD: desde 1601 hasta ~2100.
+            # Un FILETIME que produce una fecha fuera de este rango es un valor
+            # corrupto (p.ej. maximo de 64 bits 9223372036854775807 que daria
+            # el ano 30828, o un valor futuro absurdo). Se trata como
+            # "nunca logueado" en lugar de propagar fechas imposibles.
+            MAX_VALID_FILETIME = 157455360000000000  # ~ ano 2100
+            if filetime > MAX_VALID_FILETIME:
+                return datetime(1601, 1, 1)
+            try:
+                return datetime(1601, 1, 1) + timedelta(microseconds=int(filetime // 10))
+            except (OverflowError, ValueError, OSError):
+                # FILETIME corrupto o fuera del rango representable: tratar como
+                # "nunca logueado" en lugar de propagar y tumbar la operacion.
+                return datetime(1601, 1, 1)
+
+        # Default fallback (value 0 or missing)
+        return datetime.now()
+
+    def _convert_datetime_to_filetime(self, dt: datetime) -> int:
+        """
+        Convert datetime to Windows FILETIME.
+
+        Args:
+            dt: Datetime (naive or timezone-aware)
+
+        Returns:
+            FILETIME integer (100-nanosecond intervals since January 1, 1601)
+        """
+        # If dt is timezone-aware, convert to UTC and make naive
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+        epoch = datetime(1601, 1, 1)
+        delta = dt - epoch
+        return int(delta.total_seconds() * 10000000)
+
+    def _get_days_since_last_logon(self, attributes: Dict[str, Any]) -> Optional[int]:
+        """
+        Get number of days since last logon.
+
+        Args:
+            attributes: LDAP attributes dict (lastLogon may be int FILETIME
+                or datetime, as returned by ldap3)
+
+        Returns:
+            Days since last logon, or None if never logged on / unknown
+        """
+        last_logon = self._get_attr_value(attributes, 'lastLogon', 0)
+        if last_logon == 0 or last_logon is None:
+            return None
+
+        try:
+            last_logon_date = self._convert_filetime_to_datetime(last_logon)
+            return (datetime.now() - last_logon_date).days
+        except:
+            return None
+
+    def _normalize_last_logon(self, last_logon: Any) -> Optional[datetime]:
+        """
+        Normalize a lastLogon value to a naive UTC datetime.
+
+        ldap3 decodes FILETIME attributes (lastLogon, pwdLastSet, ...) as
+        datetime.datetime in some entries and as int FILETIME in others.
+        Normalize both representations to a naive UTC datetime.
+
+        Args:
+            last_logon: int/float FILETIME, datetime, or 0/None
+
+        Returns:
+            Naive UTC datetime, or None when the computer has never logged
+            on (value 0 or missing)
+        """
+        if isinstance(last_logon, datetime):
+            dt = last_logon
+            # ldap3 decodifica el FILETIME maximo (9223372036854775807) como
+            # datetime(9999, 12, 31) - un valor imposible para una cuenta real.
+            # Cualquier fecha mas alla de ~2100 es corrupta: tratar como "nunca".
+            if dt.year > 2100:
+                return None
+        elif isinstance(last_logon, (int, float)) and last_logon > 0:
+            try:
+                dt = self._convert_filetime_to_datetime(last_logon)
+            except (OverflowError, ValueError, OSError):
+                # Valor corrupto o fuera de rango: tratar como "nunca logueado".
+                return None
+            if dt.year > 2100:
+                return None
+        else:
+            return None
+
+        # Sentinel de valor corrupto: _convert_filetime_to_datetime devuelve
+        # datetime(1601, 1, 1) cuando el FILETIME excede el rango valido.
+        # En AD, 1601-01-01 es semanticamente "nunca logueado" (epoch FILETIME).
+        if dt == datetime(1601, 1, 1):
+            return None
+
+        # Ensure naive UTC for consistent comparison with cutoff dates
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
 
     @abstractmethod
     def get_schema_info(self) -> Dict[str, Any]:
