@@ -15,8 +15,10 @@ def mock_ldap_manager():
     manager = Mock()
     manager.ad_config = Mock()
     manager.ad_config.base_dn = "DC=test,DC=local"
-    manager.ad_config.organizational_units = Mock()
-    manager.ad_config.organizational_units.computers_ou = "OU=Computers,DC=test,DC=local"
+    # Los OU viven en Config.organizational_units, que el LDAPManager recibe
+    # como ou_config. No van en ad_config: ese no es el que las lleva.
+    manager.ou_config = Mock()
+    manager.ou_config.computers_ou = "OU=Computers,DC=test,DC=local"
     manager.ad_config.domain = "test.local"
     return manager
 
@@ -435,7 +437,112 @@ class TestComputerTools:
         assert len(stale_computers) == 1
         assert stale_computers[0]['sAMAccountName'] == 'STALEPC1$'
         assert stale_computers[0]['days_inactive'] >= 30
-    
+
+    def test_get_stale_computers_with_datetime_last_logon(self, computer_tools, mock_ldap_manager):
+        """Test get_stale_computers when ldap3 returns lastLogon as datetime (real-world behavior)."""
+        old_date = datetime.now() - timedelta(days=90)
+        recent_date = datetime.now() - timedelta(days=1)
+
+        # Mock LDAP search results with lastLogon as datetime (ldap3 decodes FILETIME to datetime)
+        mock_results = [
+            {
+                'dn': 'CN=STALEPC1,OU=Computers,DC=test,DC=local',
+                'attributes': {
+                    'sAMAccountName': ['STALEPC1$'],
+                    'dNSHostName': ['stalepc1.test.local'],
+                    'lastLogon': [old_date],
+                    'pwdLastSet': [old_date],
+                    'operatingSystem': ['Windows 10 Pro'],
+                    'description': ['Stale']
+                }
+            },
+            {
+                'dn': 'CN=ACTIVEPC1,OU=Computers,DC=test,DC=local',
+                'attributes': {
+                    'sAMAccountName': ['ACTIVEPC1$'],
+                    'dNSHostName': ['activepc1.test.local'],
+                    'lastLogon': [recent_date],
+                    'pwdLastSet': [recent_date],
+                    'operatingSystem': ['Windows 11 Pro'],
+                    'description': ['Active']
+                }
+            },
+            {
+                'dn': 'CN=NEVERPC1,OU=Computers,DC=test,DC=local',
+                'attributes': {
+                    'sAMAccountName': ['NEVERPC1$'],
+                    'dNSHostName': ['neverpc1.test.local'],
+                    'lastLogon': [0],
+                    'pwdLastSet': [old_date],
+                    'operatingSystem': ['Windows 10 Pro'],
+                    'description': ['Never logged on']
+                }
+            }
+        ]
+
+        mock_ldap_manager.search.return_value = mock_results
+
+        # Test get_stale_computers with 30-day threshold
+        result = computer_tools.get_stale_computers(days=30)
+
+        # Verify result
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+
+        # Parse JSON response
+        response_data = json.loads(result[0].text)
+        assert 'error' not in response_data
+        assert response_data['count'] == 2  # STALEPC1 (90d) + NEVERPC1 (never logged on)
+
+        stale_computers = response_data['stale_computers']
+        names = [c['sAMAccountName'] for c in stale_computers]
+        assert 'STALEPC1$' in names
+        assert 'NEVERPC1$' in names
+        assert 'ACTIVEPC1$' not in names
+
+    def test_get_stale_computers_with_int_filetime_last_logon(self, computer_tools, mock_ldap_manager):
+        """Test get_stale_computers when lastLogon is an int FILETIME (regression guard)."""
+        # FILETIME for a date ~90 days ago (100-ns intervals since 1601-01-01)
+        old_filetime = int((datetime.now() - timedelta(days=90) - datetime(1601, 1, 1)).total_seconds() * 10000000)
+        recent_filetime = int((datetime.now() - timedelta(days=1) - datetime(1601, 1, 1)).total_seconds() * 10000000)
+
+        mock_results = [
+            {
+                'dn': 'CN=STALEPC2,OU=Computers,DC=test,DC=local',
+                'attributes': {
+                    'sAMAccountName': ['STALEPC2$'],
+                    'dNSHostName': ['stalepc2.test.local'],
+                    'lastLogon': [old_filetime],
+                    'operatingSystem': ['Windows 10 Pro'],
+                    'description': ['Stale']
+                }
+            },
+            {
+                'dn': 'CN=ACTIVEPC2,OU=Computers,DC=test,DC=local',
+                'attributes': {
+                    'sAMAccountName': ['ACTIVEPC2$'],
+                    'dNSHostName': ['activepc2.test.local'],
+                    'lastLogon': [recent_filetime],
+                    'operatingSystem': ['Windows 11 Pro'],
+                    'description': ['Active']
+                }
+            }
+        ]
+
+        mock_ldap_manager.search.return_value = mock_results
+
+        result = computer_tools.get_stale_computers(days=30)
+
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+
+        response_data = json.loads(result[0].text)
+        assert 'error' not in response_data
+        assert response_data['count'] == 1
+
+        stale_computers = response_data['stale_computers']
+        assert stale_computers[0]['sAMAccountName'] == 'STALEPC2$'
+
     def test_get_computer_groups_success(self, computer_tools, mock_ldap_manager):
         """Test successful computer group membership retrieval."""
         # Mock search for computer

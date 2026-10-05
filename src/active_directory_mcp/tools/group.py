@@ -183,7 +183,7 @@ class GroupTools(BaseTool):
         try:
             # Determine OU
             if ou is None:
-                ou = self.ldap.ad_config.organizational_units.groups_ou
+                ou = self._default_ou("groups_ou", f"CN=Users,{self.ldap.ad_config.base_dn}")
             
             # Use display_name if provided, otherwise use group_name
             if display_name is None:
@@ -372,7 +372,7 @@ class GroupTools(BaseTool):
             group_results = self.ldap.search(
                 search_base=self.ldap.ad_config.base_dn,
                 search_filter=f"(&(objectClass=group)(sAMAccountName={self._escape_ldap_filter(group_name)}))",
-                attributes=['dn', 'member']
+                attributes=['member']
             )
             
             if not group_results:
@@ -434,7 +434,7 @@ class GroupTools(BaseTool):
             group_results = self.ldap.search(
                 search_base=self.ldap.ad_config.base_dn,
                 search_filter=f"(&(objectClass=group)(sAMAccountName={self._escape_ldap_filter(group_name)}))",
-                attributes=['dn', 'member']
+                attributes=['member']
             )
             
             if not group_results:
@@ -496,7 +496,7 @@ class GroupTools(BaseTool):
             group_results = self.ldap.search(
                 search_base=self.ldap.ad_config.base_dn,
                 search_filter=f"(&(objectClass=group)(sAMAccountName={self._escape_ldap_filter(group_name)}))",
-                attributes=['dn', 'member']
+                attributes=['member']
             )
             
             if not group_results:

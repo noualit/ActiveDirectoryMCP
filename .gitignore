@@ -179,3 +179,8 @@ ldap-config/
 *.temp
 .DS_Store
 Thumbs.db
+
+# Logs de los servidores MCP arrancados en segundo plano
+ad-config/server-*.log
+ad-config/server-*.log.out
+ad-config/server-*.log.err

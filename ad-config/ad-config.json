@@ -4,13 +4,13 @@
         "domain": "UBAGOCV.local",
         "base_dn": "DC=UBAGOCV,DC=local",
         "bind_dn": "CN=MCP,OU=Usuarios sin Política de Seguridad,DC=UBAGOCV,DC=local",
-        "password": "SvcMcp2026",
+        "password": "AhNjZr3RXs@_2iK=qCuMtB^4",
         "timeout": 30
     },
     "organizational_units": {
-        "users_ou": "OU=Users,DC=UBAGOCV,DC=local",
-        "groups_ou": "OU=Groups,DC=UBAGOCV,DC=local",
-        "computers_ou": "OU=Computers,DC=UBAGOCV,DC=local",
-        "service_accounts_ou": "OU=Service Accounts,DC=UBAGOCV,DC=local"
+        "users_ou": "OU=Usuarios,OU=Cabo Verde,DC=UBAGOCV,DC=local",
+        "groups_ou": "OU=Grupos,OU=Cabo Verde,DC=UBAGOCV,DC=local",
+        "computers_ou": "OU=Equipos,OU=Cabo Verde,DC=UBAGOCV,DC=local",
+        "service_accounts_ou": "OU=Usuarios sin Política de Seguridad,DC=UBAGOCV,DC=local"
     }
 }

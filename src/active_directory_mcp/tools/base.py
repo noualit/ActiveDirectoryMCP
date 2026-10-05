@@ -24,6 +24,24 @@ class BaseTool(ABC):
         """
         self.ldap = ldap_manager
         self.logger = get_logger(self.__class__.__name__)
+
+    def _default_ou(self, attribute: str, fallback: str) -> str:
+        """Devuelve el OU por defecto para crear objetos.
+
+        Los OU se configuran en Config.organizational_units y llegan aqui
+        como ldap_manager.ou_config. No estan en ldap_manager.ad_config, que
+        es solo la seccion ActiveDirectoryConfig: leerlos de ahi daba
+        AttributeError y hacia fallar create_group y create_computer.
+
+        Args:
+            attribute: nombre del campo ('users_ou', 'groups_ou', ...)
+            fallback: contenedor a usar si no hay config de OUs
+        """
+        ou_config = getattr(self.ldap, "ou_config", None)
+        value = getattr(ou_config, attribute, None) if ou_config is not None else None
+        if not isinstance(value, str) or not value:
+            return fallback
+        return value
     
     def _serialize_datetime(self, obj):
         """Helper function to serialize datetime objects."""

@@ -184,8 +184,9 @@ class UserTools(BaseTool):
         try:
             # Determine OU
             if ou is None:
-                # Default to CN=Users under base DN if organizational_units not configured
-                ou = f"CN=Users,{self.ldap.ad_config.base_dn}"
+                # Antes se ignoraba users_ou y todo caia en CN=Users. Ahora se
+                # respeta el OU configurado, con CN=Users como reserva.
+                ou = self._default_ou("users_ou", f"CN=Users,{self.ldap.ad_config.base_dn}")
             
             # Build DN
             user_dn = f"CN={first_name} {last_name},{ou}"
@@ -480,7 +481,7 @@ class UserTools(BaseTool):
             user_results = self.ldap.search(
                 search_base=self.ldap.ad_config.base_dn,
                 search_filter=f"(&(objectClass=user)(sAMAccountName={self._escape_ldap_filter(username)}))",
-                attributes=['memberOf', 'dn']
+                attributes=['memberOf']
             )
             
             if not user_results:

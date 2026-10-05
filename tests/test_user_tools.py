@@ -14,8 +14,10 @@ def mock_ldap_manager():
     manager = Mock()
     manager.ad_config = Mock()
     manager.ad_config.base_dn = "DC=test,DC=local"
-    manager.ad_config.organizational_units = Mock()
-    manager.ad_config.organizational_units.users_ou = "OU=Users,DC=test,DC=local"
+    # Los OU viven en Config.organizational_units, que el LDAPManager recibe
+    # como ou_config. No van en ad_config: ese no es el que las lleva.
+    manager.ou_config = Mock()
+    manager.ou_config.users_ou = "OU=Users,DC=test,DC=local"
     manager.ad_config.domain = "test.local"
     return manager
 

@@ -78,7 +78,8 @@ class ActiveDirectoryMCPHTTPServer:
         self.ldap_manager = LDAPManager(
             self.config.active_directory,
             self.config.security,
-            self.config.performance
+            self.config.performance,
+            self.config.organizational_units
         )
         
         # Test connection on startup
@@ -305,8 +306,16 @@ class ActiveDirectoryMCPHTTPServer:
             # Test LDAP connection
             try:
                 connection_info = self.ldap_manager.test_connection()
-                health_info["ldap_connection"] = "connected" if connection_info.get('connected') else "disconnected"
+                connected = bool(connection_info.get('connected'))
+                health_info["ldap_connection"] = "connected" if connected else "disconnected"
                 health_info["ldap_server"] = connection_info.get('server', 'unknown')
+                # test_connection() devuelve connected:False en vez de lanzar,
+                # asi que el except de abajo no llegaba y el estado se
+                # quedaba en 'ok' con el directorio caido. Sin esto, una tool
+                # que falla por LDAP se leia como "no habia nada que ver".
+                health_info["status"] = "ok" if connected else "degraded"
+                if not connected:
+                    health_info["ldap_error"] = connection_info.get('error', 'LDAP not connected')
             except Exception as e:
                 health_info["ldap_connection"] = "error"
                 health_info["ldap_error"] = str(e)

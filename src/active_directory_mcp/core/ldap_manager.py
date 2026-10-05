@@ -10,9 +10,14 @@ import ldap3
 from ldap3 import Server, Connection, ALL, SUBTREE, ALL_ATTRIBUTES, ALL_OPERATIONAL_ATTRIBUTES
 from ldap3.core.exceptions import LDAPException, LDAPBindError, LDAPSocketOpenError
 
-from ..config.models import ActiveDirectoryConfig, SecurityConfig, PerformanceConfig
+from ..config.models import (ActiveDirectoryConfig, SecurityConfig, PerformanceConfig,
+                             OrganizationalUnitsConfig)
 
 logger = logging.getLogger(__name__)
+
+# Codigo de resultado LDAP 0 = success. Esta version de ldap3 no lo exporta
+# como constante en el paquete raiz, asi que se declara aqui.
+RESULT_SUCCESS = 0
 
 
 class LDAPManager:
@@ -26,7 +31,8 @@ class LDAPManager:
     def __init__(self, 
                  ad_config: ActiveDirectoryConfig,
                  security_config: SecurityConfig,
-                 performance_config: PerformanceConfig):
+                 performance_config: PerformanceConfig,
+                 ou_config: Optional[OrganizationalUnitsConfig] = None):
         """
         Initialize LDAP manager.
         
@@ -34,10 +40,17 @@ class LDAPManager:
             ad_config: Active Directory configuration
             security_config: Security configuration
             performance_config: Performance configuration
+            ou_config: Organizational Units configuration. Opcional para no
+                romper a quien ya construya el manager con tres argumentos;
+                sin ella, las tools caen al contenedor por defecto de AD.
         """
         self.ad_config = ad_config
         self.security_config = security_config
         self.performance_config = performance_config
+        # Los OU cuelgan de Config.organizational_units, no de
+        # ActiveDirectoryConfig. Sin esto, create_group y create_computer
+        # reventaban con AttributeError antes de tocar el directorio.
+        self.ou_config = ou_config
         
         self._connection: Optional[Connection] = None
         self._server_pool: Optional[List[Server]] = None
@@ -198,16 +211,33 @@ class LDAPManager:
             cookie = None
             
             while True:
-                success = connection.search(
-                    search_base=search_base,
-                    search_filter=search_filter,
-                    search_scope=search_scope,
-                    attributes=attributes,
-                    paged_size=paged_size,
-                    paged_cookie=cookie
-                )
+                try:
+                    success = connection.search(
+                        search_base=search_base,
+                        search_filter=search_filter,
+                        search_scope=search_scope,
+                        attributes=attributes,
+                        paged_size=paged_size,
+                        paged_cookie=cookie
+                    )
+                except (LDAPSocketOpenError, OSError) as se:
+                    logger.warning(f"Socket error during search: {se}. Retrying...")
+                    self.disconnect()
+                    connection = self.connect()
+                    entries = []
+                    cookie = None
+                    continue
                 
-                if not success:
+                if not success and connection.result.get('result') != RESULT_SUCCESS:
+                    # Ojo: no basta con `if not success`. Con search_scope=BASE
+                    # ldap3 devuelve False cuando la busqueda no encuentra
+                    # ninguna entrada, y connection.result dice 'success' de
+                    # verdad. Eso pasaba con los grupos anidados dentro de un
+                    # grupo privilegiado (audit_admin_accounts leia cada
+                    # miembro, el anidado no es un user y no salia nada) y
+                    # reportaba un "Search failed: ... description: success"
+                    # que no significa nada. Un resultado vacio es un
+                    # resultado vacio; un error de LDAP tiene result != 0.
                     logger.error(f"Search failed: {connection.result}")
                     raise LDAPException(f"Search failed: {connection.result}")
                 
