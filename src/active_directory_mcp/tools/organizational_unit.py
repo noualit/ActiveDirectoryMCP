@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 
 import ldap3
 from ldap3 import MODIFY_ADD, MODIFY_DELETE, MODIFY_REPLACE, SUBTREE, BASE
+from ldap3.core.exceptions import LDAPException
 
 from .base import BaseTool
 from ..core.logging import log_ldap_operation
@@ -204,12 +205,21 @@ class OrganizationalUnitTools(BaseTool):
             ou_dn = f"OU={name},{parent_ou}"
             
             # Check if OU already exists
-            existing_ou = self.ldap.search(
-                search_base=ou_dn,
-                search_filter="(objectClass=organizationalUnit)",
-                attributes=['name'],
-                search_scope=ldap3.BASE
-            )
+            #
+            # Un search con scope BASE sobre un DN que aun no existe devuelve
+            # noSuchObject (codigo 32), no una lista vacia, y LDAPManager.search
+            # convierte eso en LDAPException. Sin este catch la comprobacion
+            # reventaba siempre antes del add: ningun OU se podia crear jamas.
+            existing_ou = []
+            try:
+                existing_ou = self.ldap.search(
+                    search_base=ou_dn,
+                    search_filter="(objectClass=organizationalUnit)",
+                    attributes=['name'],
+                    search_scope=ldap3.BASE
+                )
+            except LDAPException:
+                existing_ou = []
             
             if existing_ou:
                 log_ldap_operation("create_ou", ou_dn, False, "OU already exists")

@@ -249,7 +249,7 @@ class SecurityTools(BaseTool):
                 search_filter=search_filter,
                 attributes=[
                     'sAMAccountName', 'displayName', 'mail', 'lastLogon',
-                    'pwdLastSet', 'userAccountControl', 'whenCreated', 'memberOf'
+                    'pwdLastSet', 'userAccountControl', 'whenCreated'
                 ]
             )
             
@@ -266,7 +266,6 @@ class SecurityTools(BaseTool):
                     # ✅ Comparación segura: ambos son offset-aware UTC
                     if last_logon_dt is None or last_logon_dt < cutoff_date:
                         uac = self._get_attr_value(entry['attributes'], 'userAccountControl', 0)
-                        member_of = self._get_attr_list(entry['attributes'], 'memberOf')
                         
                         user_info = {
                             'dn': entry['dn'],
@@ -276,8 +275,8 @@ class SecurityTools(BaseTool):
                             'last_logon': last_logon_dt.isoformat() if last_logon_dt else 'Never',
                             'days_inactive': (datetime.now(timezone.utc) - last_logon_dt).days if last_logon_dt else 99999,
                             'enabled': not bool(uac & 0x0002),
-                            'group_count': len(member_of),
-                            'has_privileged_groups': self._has_privileged_groups(member_of)
+                            'group_count': 0,
+                            'has_privileged_groups': False
                         }
                         inactive_users.append(user_info)
                 except Exception as entry_error:

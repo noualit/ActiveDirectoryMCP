@@ -191,7 +191,7 @@ class ComputerTools(BaseTool):
             
             # Determine OU
             if ou is None:
-                ou = self.ldap.ad_config.organizational_units.computers_ou
+                ou = self._default_ou("computers_ou", f"CN=Computers,{self.ldap.ad_config.base_dn}")
             
             # Build DN
             computer_dn = f"CN={computer_cn},{ou}"
@@ -478,7 +478,6 @@ class ComputerTools(BaseTool):
         try:
             # Calculate cutoff date
             cutoff_date = datetime.now() - timedelta(days=days)
-            cutoff_filetime = self._convert_datetime_to_filetime(cutoff_date)
             
             # Search for all computers
             search_filter = "(objectClass=computer)"
@@ -494,16 +493,20 @@ class ComputerTools(BaseTool):
             for entry in results:
                 last_logon = self._get_attr_value(entry['attributes'], 'lastLogon', 0)
 
+                # Normalize lastLogon: ldap3 decodes FILETIME attributes as datetime
+                # in some entries and as int FILETIME in others. Compare as datetime.
+                last_logon_dt = self._normalize_last_logon(last_logon)
+
                 # Check if computer is stale
-                if last_logon == 0 or last_logon < cutoff_filetime:
+                if last_logon_dt is None or last_logon_dt < cutoff_date:
                     computer_info = {
                         'dn': entry['dn'],
                         'sAMAccountName': self._get_attr_value(entry['attributes'], 'sAMAccountName', ''),
                         'dNSHostName': self._get_attr_value(entry['attributes'], 'dNSHostName', ''),
                         'operatingSystem': self._get_attr_value(entry['attributes'], 'operatingSystem', ''),
                         'description': self._get_attr_value(entry['attributes'], 'description', ''),
-                        'lastLogon': self._convert_filetime_to_datetime(last_logon) if last_logon > 0 else 'Never',
-                        'daysSinceLastLogon': self._get_days_since_last_logon(entry['attributes'])
+                        'lastLogon': last_logon_dt.isoformat() if last_logon_dt else 'Never',
+                        'daysSinceLastLogon': (datetime.now() - last_logon_dt).days if last_logon_dt else None
                     }
                     stale_computers.append(computer_info)
             
@@ -572,18 +575,6 @@ class ComputerTools(BaseTool):
         """Check if computer is trusted for delegation."""
         return bool(uac_value & 0x80000)  # Check TRUSTED_FOR_DELEGATION flag
     
-    def _get_days_since_last_logon(self, attributes: Dict[str, Any]) -> Optional[int]:
-        """Get number of days since last logon."""
-        last_logon = self._get_attr_value(attributes, 'lastLogon', 0)
-        if last_logon == 0 or last_logon is None:
-            return None
-
-        try:
-            last_logon_date = self._convert_filetime_to_datetime(last_logon)
-            return (datetime.now() - last_logon_date).days
-        except:
-            return None
-
     def _get_password_age_days(self, attributes: Dict[str, Any]) -> Optional[int]:
         """Get number of days since password was last set."""
         pwd_last_set = self._get_attr_value(attributes, 'pwdLastSet', 0)
@@ -595,26 +586,6 @@ class ComputerTools(BaseTool):
             return (datetime.now() - pwd_date).days
         except:
             return None
-    
-    def _convert_filetime_to_datetime(self, filetime) -> datetime:
-        """Convert Windows FILETIME to datetime."""
-        # If already datetime, return as is
-        if isinstance(filetime, datetime):
-            return filetime
-            
-        # Convert integer FILETIME (100-nanosecond intervals since January 1, 1601)
-        if isinstance(filetime, (int, float)) and filetime != 0:
-            return datetime(1601, 1, 1) + timedelta(microseconds=filetime / 10)
-        
-        # Default fallback
-        return datetime.now()
-    
-    def _convert_datetime_to_filetime(self, dt: datetime) -> int:
-        """Convert datetime to Windows FILETIME."""
-        # FILETIME is 100-nanosecond intervals since January 1, 1601
-        epoch = datetime(1601, 1, 1)
-        delta = dt - epoch
-        return int(delta.total_seconds() * 10000000)
     
     # Additional methods that tests expect
     def get_computer_status(self, computer_name: str) -> Dict[str, Any]:

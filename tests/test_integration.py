@@ -2,6 +2,7 @@
 
 import pytest
 import json
+import asyncio
 import tempfile
 import os
 from datetime import datetime, timedelta
@@ -837,3 +838,44 @@ class TestPerformanceAndScalability:
         
         # Verify multiple searches were performed
         assert mock_search.call_count == 10
+
+
+class TestHealthReportaElEstadoReal:
+    """health no puede decir 'ok' con el directorio caido.
+
+    test_connection() devuelve {'connected': False} en vez de lanzar
+    excepcion, asi que el except de health nunca se ejecutaba y el estado
+    se quedaba en 'ok'. El LSM leia eso y conclnia que todo iba bien.
+    """
+
+    @staticmethod
+    def _health(server):
+        resultado = asyncio.run(server.mcp.call_tool("health", {}))
+        return json.loads(resultado.content[0].text)
+
+    @patch('active_directory_mcp.core.ldap_manager.LDAPManager.test_connection')
+    @patch('active_directory_mcp.core.ldap_manager.LDAPManager.connect')
+    def test_degraded_cuando_ldap_no_conecta(self, mock_connect, mock_test_connection, config_file):
+        """Con LDAP caido, el estado no puede ser 'ok'."""
+        mock_test_connection.return_value = {'connected': False,
+                                             'server': 'ldap://test.local:389'}
+        mock_connect.return_value = Mock()
+
+        server = ActiveDirectoryMCPHTTPServer(config_file)
+        payload = self._health(server)
+
+        assert payload['ldap_connection'] == 'disconnected'
+        assert payload['status'] == 'degraded'
+
+    @patch('active_directory_mcp.core.ldap_manager.LDAPManager.test_connection')
+    @patch('active_directory_mcp.core.ldap_manager.LDAPManager.connect')
+    def test_ok_cuando_ldap_conecta(self, mock_connect, mock_test_connection, config_file):
+        """El camino feliz se mantiene: si conecta, 'ok'."""
+        mock_test_connection.return_value = {'connected': True, 'server': 'test.local'}
+        mock_connect.return_value = Mock()
+
+        server = ActiveDirectoryMCPHTTPServer(config_file)
+        payload = self._health(server)
+
+        assert payload['ldap_connection'] == 'connected'
+        assert payload['status'] == 'ok'

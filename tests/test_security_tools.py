@@ -89,6 +89,9 @@ class TestSecurityTools:
                         'CN=Administrator,CN=Users,DC=test,DC=local',
                         'CN=Admin User,OU=Users,DC=test,DC=local'
                     ],
+                    # El RID es lo que identifica al grupo. El nombre cambia con
+                    # el idioma del dominio, el RID no.
+                    'objectSid': ['S-1-5-21-1112223333-4445556666-777888999-512'],
                     'whenCreated': [datetime.now() - timedelta(days=365)],
                     'adminCount': [1]
                 }
@@ -100,6 +103,7 @@ class TestSecurityTools:
                     'displayName': ['Enterprise Admins'],
                     'description': ['Designated administrators of the enterprise'],
                     'member': ['CN=Administrator,CN=Users,DC=test,DC=local'],
+                    'objectSid': ['S-1-5-21-1112223333-4445556666-777888999-519'],
                     'adminCount': [1]
                 }
             },
@@ -109,30 +113,39 @@ class TestSecurityTools:
                     'sAMAccountName': ['Backup Operators'],
                     'displayName': ['Backup Operators'],
                     'description': ['Backup Operators can override security restrictions'],
-                    'member': ['CN=Backup Service,OU=Service Accounts,DC=test,DC=local']
+                    'member': ['CN=Backup Service,OU=Service Accounts,DC=test,DC=local'],
+                    'objectSid': ['S-1-5-21-1112223333-4445556666-777888999-551']
                 }
             }
         ]
-        
+
         mock_ldap_manager.search.return_value = mock_results
-        
+
         # Test get_privileged_groups
         result = security_tools.get_privileged_groups()
-        
+
         # Verify result
         assert len(result) == 1
         assert isinstance(result[0], TextContent)
-        
+
         # Parse JSON response
         response_data = json.loads(result[0].text)
         assert response_data['total_groups'] == 3
         assert len(response_data['privileged_groups']) == 3
-        
+
         # Check specific groups
-        groups = {group['sAMAccountName']: group for group in response_data['privileged_groups']}
+        groups = {g['sam_account_name']: g for g in response_data['privileged_groups']}
         assert 'Domain Admins' in groups
         assert 'Enterprise Admins' in groups
         assert 'Backup Operators' in groups
+
+        # Backup Operators se cuela por el RID (551) y no por el nombre: su
+        # nombre no tiene nada de "admin".
+        assert groups['Backup Operators']['detected_by'] == 'rid'
+        assert groups['Backup Operators']['well_known_role'] == 'Backup Operators'
+        assert groups['Backup Operators']['risk_tier'] == 'elevated'
+        assert groups['Domain Admins']['well_known_role'] == 'Domain Admins'
+        assert groups['Domain Admins']['risk_tier'] == 'critical'
         
         # Check risk assessment
         domain_admins = groups['Domain Admins']
@@ -223,6 +236,54 @@ class TestSecurityTools:
         svc_admin = accounts['svc.admin']
         assert svc_admin['password_age_days'] >= 365
         assert svc_admin['risk_level'] == 'HIGH'
+
+    def test_audit_admin_accounts_with_datetime_last_logon(self, security_tools, mock_ldap_manager):
+        """Test audit_admin_accounts when ldap3 returns lastLogon as datetime (real-world behavior)."""
+        # Group search (Domain Admins) -> 1 member; user search -> lastLogon as datetime
+        mock_ldap_manager.search.side_effect = [
+            [  # Group search: Domain Admins
+                {
+                    'dn': 'CN=Domain Admins,CN=Users,DC=test,DC=local',
+                    'attributes': {
+                        'member': ['CN=Administrator,CN=Users,DC=test,DC=local']
+                    }
+                }
+            ],
+            [  # User search: Administrator with datetime lastLogon
+                {
+                    'dn': 'CN=Administrator,CN=Users,DC=test,DC=local',
+                    'attributes': {
+                        'sAMAccountName': ['Administrator'],
+                        'displayName': ['Built-in Administrator'],
+                        'userAccountControl': [512],  # Enabled
+                        'lastLogon': [datetime.now() - timedelta(days=120)],
+                        'pwdLastSet': [datetime.now() - timedelta(days=30)],
+                        'logonCount': [100],
+                        'badPwdCount': [0]
+                    }
+                }
+            ],
+            [],  # Enterprise Admins
+            [],  # Schema Admins
+            []   # Administrators
+        ]
+
+        # Test audit_admin_accounts
+        result = security_tools.audit_admin_accounts()
+
+        # Verify result
+        assert len(result) == 1
+        assert isinstance(result[0], TextContent)
+
+        # Parse JSON response
+        response_data = json.loads(result[0].text)
+        assert response_data['total_admin_accounts'] == 1
+
+        # Administrator must be present with a real last_logon (not lost to TypeError)
+        admin = response_data['admin_accounts'][0]
+        assert admin['sam_account_name'] == 'Administrator'
+        assert admin['last_logon'] != 'Never'
+        assert admin['days_since_logon'] is not None
     
     def test_check_password_policy_success(self, security_tools, mock_ldap_manager):
         """Test password policy compliance check."""
@@ -592,3 +653,36 @@ class TestSecurityTools:
         assert 'HIGH' in schema['risk_levels']
         assert 'CRITICAL' in schema['risk_levels']
 
+
+
+class TestSecurityToolsPropagaFallos:
+    """Un fallo de LDAP no puede disfrazarse de "no hay nada".
+
+    Sin esto, con el directorio caido estas tools devolvian listas vacias
+    (total_admin_accounts: 0, total_groups: 0) y el modelo afirmaba que el
+    dominio no tenia administradores. Eso es un falso negativo de seguridad.
+    """
+
+    def test_get_privileged_groups_falla_si_ninguna_busqueda_va(self, security_tools, mock_ldap_manager):
+        """Si todas las busquedas fallan, hay que devolver error, no lista vacia."""
+        mock_ldap_manager.search.side_effect = Exception("Failed to connect to any LDAP server")
+
+        result = security_tools.get_privileged_groups()
+
+        response_data = json.loads(result[0].text)
+        assert response_data['success'] is False
+        assert 'Failed to connect' in response_data['error']
+
+    def test_audit_admin_accounts_falla_si_ninguna_busqueda_va(self, security_tools, mock_ldap_manager):
+        """Mismo contrato en el audit de cuentas de administracion."""
+        mock_ldap_manager.search.side_effect = Exception("Failed to connect to any LDAP server")
+
+        result = security_tools.audit_admin_accounts()
+
+        response_data = json.loads(result[0].text)
+        assert response_data['success'] is False
+        assert 'Failed to connect' in response_data['error']
+
+    # Los fallos parciales por grupo ya no existen: se lee el directorio una
+    # sola vez y o va o falla la tool entera. La invariante de "una sola
+    # busqueda" vive en tests/test_privileged_groups.py.
