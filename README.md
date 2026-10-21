@@ -197,6 +197,22 @@ For local HTTP transport development:
 python -m active_directory_mcp.server_http --host 0.0.0.0 --port 8813 --path /activedirectory-mcp
 ```
 
+### Windows Service (Production)
+
+Run the HTTP server as a native Windows service (auto-start with the system):
+
+```powershell
+# Install + start (run PowerShell as Administrator)
+.\install_service.ps1
+
+# Manage
+net start ActiveDirectoryMCP
+net stop ActiveDirectoryMCP
+```
+
+Logs: `ad-config\mcp_service.log` (service) and `ad-config\service_console.log`
+(server/uvicorn). Full guide: [WINDOWS_SERVICE.md](WINDOWS_SERVICE.md).
+
 ## 🔧 Cursor/VS Code Integration
 
 ### Option 1: Docker Compose (Recommended)
