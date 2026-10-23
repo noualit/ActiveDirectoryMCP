@@ -359,21 +359,31 @@ class ActiveDirectoryMCPHTTPServer:
             }
             return [Content(type="text", text=json.dumps(error_response, indent=2))]
 
-    def run(self) -> None:
+    def _shutdown(self) -> None:
+        """Gracefully shut down the HTTP server."""
+        self.logger.info("Shutting down HTTP server...")
+        self.ldap_manager.disconnect()
+
+    def run(self, setup_signals: bool = True) -> None:
         """
         Start the HTTP MCP server.
         
         Runs the server with HTTP transport on the configured
         host and port.
+        
+        Args:
+            setup_signals: If True, set up SIGINT/SIGTERM handlers.
+                          Set to False when running in a background thread.
         """
-        def signal_handler(signum, frame):
-            self.logger.info("Received signal to shutdown HTTP server...")
-            self.ldap_manager.disconnect()
-            sys.exit(0)
+        if setup_signals:
+            def signal_handler(signum, frame):
+                self.logger.info("Received signal to shutdown HTTP server...")
+                self.ldap_manager.disconnect()
+                sys.exit(0)
 
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+            # Set up signal handlers
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
 
         try:
             self.logger.info(f"Starting Active Directory MCP HTTP server on {self.host}:{self.port}{self.path}")
@@ -384,7 +394,8 @@ class ActiveDirectoryMCPHTTPServer:
             self.mcp.run(
                 transport="streamable-http",
                 host=self.host,
-                port=self.port
+                port=self.port,
+                path=self.path
             )
         except Exception as e:
             self.logger.error(f"HTTP server error: {e}")

@@ -53,6 +53,9 @@ django = [
     "djangorestframework>=3.14.0",
     "pyjwt>=2.8.0",
 ]
+windows = [
+    "pywin32>=306",
+]
 
 [project.urls]
 Homepage = "https://github.com/alpadalar/ActiveDirectoryMCP"
@@ -62,6 +65,7 @@ Issues = "https://github.com/alpadalar/ActiveDirectoryMCP/issues"
 
 [project.scripts]
 activedirectory-mcp = "active_directory_mcp.server:main"
+activedirectory-mcp-service = "active_directory_mcp.windows_service:main"
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"

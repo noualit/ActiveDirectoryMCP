@@ -17,7 +17,7 @@ class ActiveDirectoryConfig(BaseModel):
     password: str = Field(..., description="Service account password")
     timeout: int = Field(default=30, description="Connection timeout in seconds")
     auto_bind: bool = Field(default=True, description="Automatically bind on connection")
-    receive_timeout: int = Field(default=10, description="Receive timeout in seconds")
+    receive_timeout: int = Field(default=30, description="Receive timeout in seconds")
     
     @field_validator('server')
     @classmethod
@@ -72,7 +72,7 @@ class PerformanceConfig(BaseModel):
     connection_pool_size: int = Field(default=10, description="Connection pool size")
     max_retries: int = Field(default=3, description="Maximum connection retries")
     retry_delay: float = Field(default=1.0, description="Retry delay in seconds")
-    page_size: int = Field(default=500, description="LDAP search page size")
+    page_size: int = Field(default=200, description="LDAP search page size")
     
     @field_validator('connection_pool_size', 'max_retries', 'page_size')
     @classmethod

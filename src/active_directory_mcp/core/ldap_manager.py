@@ -6,12 +6,14 @@ import time
 from typing import Optional, List, Dict, Any, Union
 from threading import Lock
 
+import socket
+
 import ldap3
 from ldap3 import Server, Connection, ALL, SUBTREE, ALL_ATTRIBUTES, ALL_OPERATIONAL_ATTRIBUTES
 from ldap3.core.exceptions import LDAPException, LDAPBindError, LDAPSocketOpenError
 
 from ..config.models import (ActiveDirectoryConfig, SecurityConfig, PerformanceConfig,
-                             OrganizationalUnitsConfig)
+                              OrganizationalUnitsConfig)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +133,17 @@ class LDAPManager:
                                 check_names=True,
                                 raise_exceptions=True
                             )
+                            
+                            # Habilitar TCP keepalive en el socket de la conexion
+                            # para evitar WinError 10054 por cierres silenciosos
+                            # de firewalls/IDS o del DC.
+                            if connection.socket is not None:
+                                try:
+                                    connection.socket.setsockopt(
+                                        socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1
+                                    )
+                                except OSError:
+                                    logger.debug("Could not set SO_KEEPALIVE on socket")
                             
                             # Test the connection
                             if connection.bind():
