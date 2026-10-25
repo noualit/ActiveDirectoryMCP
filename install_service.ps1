@@ -110,12 +110,7 @@ Write-Host "Python executable:   $pythonExePath" -ForegroundColor Green
 
 # Verify the environment has the required packages
 Write-Host "Verifying packages in '$CondaEnv' environment..." -ForegroundColor Yellow
-$verifyScript = @"
-import win32service
-import active_directory_mcp
-print("All packages OK")
-"@
-$verifyResult = & $pythonExePath -c "$verifyScript" 2>&1
+$verifyResult = & $pythonExePath -c "import win32service, active_directory_mcp; print('All packages OK')" 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Required packages not found in '$CondaEnv' environment." -ForegroundColor Red
     Write-Host $verifyResult -ForegroundColor Red
